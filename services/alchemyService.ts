@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AlchemyElement, CombinationResult } from "../types";
 
@@ -147,6 +148,7 @@ export const combineElements = async (
 ): Promise<CombinationResult> => {
   
   // 1. GENERATE KEY (Always sorted A-Z to match RECIPES)
+  // "Fire" + "Water" becomes "Fire|Water" (if Fire comes first alphabetically? No, key should be sorted)
   const names = [elementA.name, elementB.name].sort();
   const key = `${names[0]}|${names[1]}`;
   
@@ -182,42 +184,36 @@ export const combineElements = async (
 
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey });
-    // Use latest flash model for speed
-    const model = "gemini-2.5-flash-latest"; 
+    const model = "gemini-3-flash-preview"; 
     
-    const prompt = `Mix: ${elementA.name} + ${elementB.name}.
-    Return a single JSON object.
-    Structure: { "success": true, "name": "Result Name", "emoji": "🔥", "description": "Short desc", "color": "#hex" }
-    If invalid mix, success: false. Be creative. NO MARKDOWN.`;
+    // Improved Prompt
+    const prompt = `Crafting Game Logic:
+    Combine "${elementA.name}" + "${elementB.name}".
+    
+    Rules:
+    1. Result must be a noun (concept, object, lifeform).
+    2. BE CREATIVE. If no obvious mix, invent a logical fantasy or abstract concept.
+    3. Return 'success: false' ONLY if they truly cancel each other out (rare).
+    
+    Output JSON ONLY:
+    { "success": true, "name": "Name", "emoji": "🔥", "description": "Short desc", "color": "#hex" }`;
 
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        // Increased safety margin. 120 was too low and caused cut-off JSON.
-        // 1024 is still very fast but prevents JSON errors.
-        maxOutputTokens: 1024, 
-        temperature: 1.0, 
+        // Using loose schema validation for better creativity
       },
     });
 
     const text = response.text;
     if (!text) throw new Error("No response from AI");
 
-    // Robust JSON extraction:
-    // Sometimes models add text before or after the JSON even with responseMimeType
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
+    // CLEAN JSON: Remove markdown code blocks if present
+    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
     
-    if (jsonStart === -1 || jsonEnd === -1) {
-       console.error("Invalid JSON format received:", text);
-       throw new Error("Invalid JSON format");
-    }
-
-    const cleanText = text.substring(jsonStart, jsonEnd + 1);
     const result = JSON.parse(cleanText);
-    
     let finalResult: CombinationResult;
 
     if (result.success && result.name) {
@@ -227,7 +223,7 @@ export const combineElements = async (
           id: result.name.toLowerCase().replace(/\s+/g, '-'),
           name: result.name,
           emoji: result.emoji || '✨',
-          description: result.description || `Combined from ${elementA.name} and ${elementB.name}`,
+          description: result.description || `A combination of ${elementA.name} and ${elementB.name}.`,
           color: result.color || '#a3a3a3',
           isNew: true,
         },
@@ -244,7 +240,7 @@ export const combineElements = async (
 
   } catch (error) {
     console.error("Alchemy combination failed:", error);
-    // On timeout or error, fail gracefully without crashing
+    // Silent fail so game doesn't crash, user just sees nothing happen
     return { success: false };
   }
 };
