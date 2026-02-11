@@ -182,31 +182,40 @@ export const combineElements = async (
 
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey });
-    // Use Flash Flash-Latest for maximum speed
+    // Use latest flash model for speed
     const model = "gemini-2.5-flash-latest"; 
     
-    // Minified Prompt for Speed
-    // We ask for LESS text to generate, making it faster.
     const prompt = `Mix: ${elementA.name} + ${elementB.name}.
-    JSON Output: { "success": true, "name": "Result Name", "emoji": "🔥", "description": "Short desc (max 6 words)", "color": "#hex" }
-    If invalid mix, success: false. Be creative.`;
+    Return a single JSON object.
+    Structure: { "success": true, "name": "Result Name", "emoji": "🔥", "description": "Short desc", "color": "#hex" }
+    If invalid mix, success: false. Be creative. NO MARKDOWN.`;
 
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        // CRITICAL SPEED FIX: Limit output tokens. 
-        // Forces model to stop generating immediately after the JSON object is done.
-        maxOutputTokens: 120, 
-        temperature: 1.0, // High creativity but fast due to token limit
+        // Increased safety margin. 120 was too low and caused cut-off JSON.
+        // 1024 is still very fast but prevents JSON errors.
+        maxOutputTokens: 1024, 
+        temperature: 1.0, 
       },
     });
 
     const text = response.text;
-    if (!text) throw new Error("No response");
+    if (!text) throw new Error("No response from AI");
 
-    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    // Robust JSON extraction:
+    // Sometimes models add text before or after the JSON even with responseMimeType
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    
+    if (jsonStart === -1 || jsonEnd === -1) {
+       console.error("Invalid JSON format received:", text);
+       throw new Error("Invalid JSON format");
+    }
+
+    const cleanText = text.substring(jsonStart, jsonEnd + 1);
     const result = JSON.parse(cleanText);
     
     let finalResult: CombinationResult;
